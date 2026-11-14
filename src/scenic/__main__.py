@@ -65,6 +65,19 @@ mainOptions.add_argument(
 mainOptions.add_argument(
     "--2d", action="store_true", help="run Scenic in 2D compatibility mode"
 )
+mainOptions.add_argument(
+    "--report-results", action="store_true", help="once simulation is over produce a report"
+)
+mainOptions.add_argument(
+    "--save-failed-scenes", action="store_true", help="save failed scenes for debugging"
+)
+mainOptions.add_argument(
+    "--failed-scenes-dir", default="./scenic-failures", help="location to save failed scenes for debugging", metavar="FILE"
+)
+mainOptions.add_argument(
+    "--rerun-failed", default="", help="location of failed scenes for rerunning", metavar="FILE"
+)
+
 
 # Simulation options
 simOpts = parser.add_argument_group("dynamic simulation options")
