@@ -852,6 +852,34 @@ class Simulation(abc.ABC):
             raise RuntimeError("cannot save replay without replay support enabled")
         return self._replayOut.getBytes()
 
+    def checkPass(self):
+        passed = self.result.records["PASSED"]
+
+        if not type(passed) == bool:
+            raise RuntimeError("record `PASSED` is not a boolean")
+
+        if passed == False:
+            return False
+
+        failed = self.result.records.get("FAILED", None)
+        if failed is not None:
+            if type(failed) is bool:
+                if failed == True:
+                    return False
+            elif isinstance(failed, list):
+                for step, value in failed:
+                    if type(value) is not bool:
+                        raise RuntimeError("record `FAILED` must contain booleans")
+
+                    if value == True:
+                        return False
+
+            else:
+                raise RuntimeError("record `FAILED` must contain booleans")
+
+        return True
+
+
 
 class ReplayMode(enum.IntFlag):
     checkDivergence = enum.auto()

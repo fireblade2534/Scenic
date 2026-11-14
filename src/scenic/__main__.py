@@ -72,10 +72,10 @@ mainOptions.add_argument(
     "--save-failed-scenes", action="store_true", help="save failed scenes for debugging"
 )
 mainOptions.add_argument(
-    "--failed-scenes-dir", default="./scenic-failures", help="location to save failed scenes for debugging", metavar="FILE"
+    "--failed-scenes-dir", default="./scenic-failures", help="location to save failed scenes for debugging", metavar="DIR"
 )
 mainOptions.add_argument(
-    "--rerun-failed", default="", help="location of failed scenes for rerunning", metavar="FILE"
+    "--rerun-failed", default="", help="location of failed scenes for rerunning", metavar="PATH"
 )
 
 
@@ -173,6 +173,20 @@ if not mode2D:
     if args.zoom != 1:
         warnings.warn("Zoom parameter is not supported by the 3D viewer.")
 
+if args.report_results == True:
+    if args.count <= 0:
+        raise RuntimeError("report-results cannot be enabled with no defined count of simulations")
+
+    if not args.simulate:
+        raise RuntimeError("report-results cannot be enabled without simulation")
+
+if args.save_failed_scenes == True:
+    if args.count <= 0:
+        raise RuntimeError("save-failed-scenes cannot be enabled with no defined count of simulations")
+
+    if not args.simulate:
+        raise RuntimeError("save-failed-scenes cannot be enabled without simulation")
+
 scenic.setDebuggingOptions(
     verbosity=args.verbosity,
     fullBacktrace=args.full_backtrace,
@@ -214,6 +228,12 @@ scenario = errors.callBeginningScenicTrace(
         mode2D=mode2D,
     )
 )
+
+if args.report_results or args.save_failed_scenes:
+    errors.callBeginningScenicTrace(
+        lambda: scenario.validateTestRecords()
+    )
+
 totalTime = time.time() - startTime
 if args.verbosity >= 1:
     print(f"Scenario constructed in {totalTime:.2f} seconds.")
@@ -253,7 +273,7 @@ def runSimulation(scene, sceneCount):
     except SimulationCreationError as e:
         if args.verbosity >= 1:
             print(f"  Failed to create simulation: {e}")
-        return False
+        return None
     if args.verbosity >= 1:
         totalTime = time.time() - startTime
         print(f"  Ran simulation in {totalTime:.4g} seconds.")
@@ -265,7 +285,7 @@ def runSimulation(scene, sceneCount):
                     print(f"      {step:4d}: {subval}")
             else:
                 print(f'    Record "{name}": {value}')
-    return simulation is not None
+    return simulation
 
 
 try:
@@ -283,13 +303,25 @@ try:
 
         sceneCount = 0
         successCount = 0
+        failedScenes = []
         while True:
             scene, _ = generateScene()
             sceneCount += 1
             if args.simulate:
-                success = runSimulation(scene, sceneCount)
-                if success:
+                simulation_result = runSimulation(scene, sceneCount)
+                if simulation_result is not None:
                     successCount += 1
+
+                    if args.report_results or args.save_failed_scenes:
+                        passed = simulation_result.checkPass()
+
+                        if passed == False:
+
+                            if args.save_failed_scenes:
+                                pass # TODO: SAVE FAILED SCENES
+                        
+                            if args.report_results:
+                                failedScenes.append(sceneCount)
             else:
                 successCount += 1
                 if mode2D:
@@ -304,6 +336,26 @@ try:
 
             if 0 < args.count <= successCount:
                 break
+
+        if args.report_results:
+            passed_ammount = successCount - len(failedScenes)
+            passed_rate = (passed_ammount / successCount) * 100
+
+            print("=" * 30)
+            print("Scenic Test Report")
+            print("=" * 30)
+            print(f"\nScenario: {args.scenicFile}")
+            print(f"Requested: {args.count}")
+            print("\nResults")
+            print(f"Passed: {passed_ammount} ({passed_rate:.1f}%)")
+            print(f"Failed: {len(failedScenes)} ({(100 - passed_rate):.1f}%)")
+            print("\nFailed Simulations")
+            if len(failedScenes) > 0:
+                print(" ID ")
+                for id in failedScenes:
+                    print(f"{id:04d}")
+            else:
+                print("None")
 
     else:  # Gather statistics over the specified number of scenes/iterations
         its = []

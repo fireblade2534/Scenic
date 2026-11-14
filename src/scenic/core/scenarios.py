@@ -412,6 +412,42 @@ class Scenario(_ScenarioPickleMixin):
                             f"{oi} at {oi.position} intersects" f" {oj} at {oj.position}"
                         )
 
+    def validateTestRecords(self):
+        failed_found = False
+        passed_found = False
+    
+        for record in self.recordedFinalExprs:
+            if record.name == "PASSED":
+                if passed_found == True:
+                    raise InvalidScenarioError("Only one `PASSED` record final is allowed")
+                passed_found = True
+    
+            if record.name == "FAILED":
+                if failed_found == True:
+                    raise InvalidScenarioError("Only one `FAILED` record final is allowed")
+                failed_found = True
+        
+        if passed_found == False:
+            raise InvalidScenarioError("A `PASSED` record final is required")
+        
+        for record in self.recordedExprs:
+            if record.name == "PASSED":
+                raise InvalidScenarioError("The `PASSED` record can only be a record final")
+    
+            if record.name == "FAILED":
+                if failed_found == True:
+                    raise InvalidScenarioError("Only one `FAILED` record is allowed")
+                failed_found = True
+
+        for record in self.recordedInitialExprs:
+            if record.name == "PASSED":
+                raise InvalidScenarioError("The `PASSED` record can only be a record final")
+    
+            if record.name == "FAILED":
+                raise InvalidScenarioError("The `FAILED` record cannot be a record initial")
+            
+        return True
+
     def generate(self, maxIterations=2000, verbosity=0, feedback=None):
         """Sample a `Scene` from this scenario.
 
