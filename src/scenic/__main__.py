@@ -3,18 +3,20 @@
 
 import argparse
 from importlib import metadata
+import json
 import random
 import sys
 import time
 import warnings
-
+import os
+import shutil
 import numpy
-
 import scenic
 from scenic.core.distributions import RejectionException
 import scenic.core.errors as errors
 from scenic.core.simulators import SimulationCreationError
 import scenic.syntax.translator as translator
+from datetime import datetime
 
 parser = argparse.ArgumentParser(
     prog="scenic",
@@ -72,7 +74,7 @@ mainOptions.add_argument(
     "--save-failed-scenes", action="store_true", help="save failed scenes for debugging"
 )
 mainOptions.add_argument(
-    "--failed-scenes-dir", default="./scenic-failures", help="location to save failed scenes for debugging", metavar="DIR"
+    "--failed-scenes-dir", default="./scenic_failures", help="location to save failed scenes for debugging", metavar="DIR"
 )
 mainOptions.add_argument(
     "--rerun-failed", default="", help="location of failed scenes for rerunning", metavar="PATH"
@@ -301,6 +303,28 @@ try:
                     "(try installing python3-tk)"
                 )
 
+        base_folder_name = os.path.join(args.failed_scenes_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f"))
+        if args.save_failed_scenes:
+            os.makedirs(base_folder_name)
+
+            shutil.copy2(args.scenicFile, os.path.join(base_folder_name, "scenario.scenic"))
+
+            metadata = {
+                "original_scenario_path": os.path.abspath(args.scenicFile),
+                "command": sys.argv.copy()
+            }
+
+            json.dump(
+                metadata,
+                open(os.path.join(base_folder_name, "metadata.json"), "w"),
+                indent=4
+            )
+
+        report_enabled = (
+            args.report_results
+            or args.save_failed_scenes
+        )
+        
         sceneCount = 0
         successCount = 0
         failedScenes = []
@@ -312,16 +336,19 @@ try:
                 if simulation_result is not None:
                     successCount += 1
 
-                    if args.report_results or args.save_failed_scenes:
+                    if report_enabled:
                         passed = simulation_result.checkPass()
 
                         if passed == False:
 
                             if args.save_failed_scenes:
-                                pass # TODO: SAVE FAILED SCENES
+                                scene_folder = os.path.join(base_folder_name, f"scene{sceneCount:04d}")
+                                os.mkdir(scene_folder)
+                                data = scenario.sceneToBytes(scene)
+                                with open(os.path.join(scene_folder, "data.bin"), "wb") as file:
+                                    file.write(data)
                         
-                            if args.report_results:
-                                failedScenes.append(sceneCount)
+                            failedScenes.append(sceneCount)
             else:
                 successCount += 1
                 if mode2D:
@@ -337,25 +364,37 @@ try:
             if 0 < args.count <= successCount:
                 break
 
-        if args.report_results:
+        if report_enabled:
             passed_ammount = successCount - len(failedScenes)
             passed_rate = (passed_ammount / successCount) * 100
 
-            print("=" * 30)
-            print("Scenic Test Report")
-            print("=" * 30)
-            print(f"\nScenario: {args.scenicFile}")
-            print(f"Requested: {args.count}")
-            print("\nResults")
-            print(f"Passed: {passed_ammount} ({passed_rate:.1f}%)")
-            print(f"Failed: {len(failedScenes)} ({(100 - passed_rate):.1f}%)")
-            print("\nFailed Simulations")
+            report_text = [
+                "=" * 40,
+                "Scenic Test Report",
+                "=" * 40,
+                "",
+                f"Scenario: {args.scenicFile}",
+                f"Requested: {args.count}",
+                f"Completed: {successCount}",
+                "",
+                f"Passed: {passed_ammount} ({passed_rate:.1f}%)",
+                f"Failed: {len(failedScenes)} ({(100 - passed_rate):.1f}%)",
+            ]
+
             if len(failedScenes) > 0:
-                print(" ID ")
+                report_text.append("\nFailed Simulations")
                 for id in failedScenes:
-                    print(f"{id:04d}")
-            else:
-                print("None")
+                    report_text.append(f"  {id:04d}")
+
+            if args.report_results:
+                print("\n".join(report_text))
+
+            if args.save_failed_scenes:
+                with open(os.path.join(base_folder_name, "report.txt"), "w") as file:
+                    file.write("\n".join(report_text))
+
+                
+            
 
     else:  # Gather statistics over the specified number of scenes/iterations
         its = []

@@ -855,8 +855,10 @@ class Simulation(abc.ABC):
     def checkPass(self):
         passed = self.result.records["PASSED"]
 
-        if not type(passed) == bool:
-            raise RuntimeError("record `PASSED` is not a boolean")
+        if type(passed) is not bool:
+            raise RuntimeError(
+                f"record `PASSED` contains {passed!r} ({type(passed).__name__}), expected bool"
+            )
 
         if passed == False:
             return False
@@ -869,13 +871,17 @@ class Simulation(abc.ABC):
             elif isinstance(failed, list):
                 for step, value in failed:
                     if type(value) is not bool:
-                        raise RuntimeError("record `FAILED` must contain booleans")
+                        raise RuntimeError(
+                            f"record `FAILED` at step {step}, contains {value!r} ({type(value).__name__}), expected bool"
+                        )
 
                     if value == True:
                         return False
 
             else:
-                raise RuntimeError("record `FAILED` must contain booleans")
+                raise RuntimeError(
+                    f"record `FAILED` contains {failed!r} ({type(failed).__name__}), expected bool"
+                )
 
         return True
 
