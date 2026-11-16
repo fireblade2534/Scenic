@@ -15,6 +15,7 @@ import numpy
 import scenic
 from scenic.core.distributions import RejectionException
 import scenic.core.errors as errors
+from scenic.core.scenarios import Scenario, Scene
 from scenic.core.simulators import SimulationCreationError
 import scenic.syntax.translator as translator
 from datetime import datetime
@@ -179,14 +180,14 @@ if not mode2D:
         warnings.warn("Zoom parameter is not supported by the 3D viewer.")
 
 if args.report_results == True:
-    if args.count <= 0:
+    if args.count <= 0 and not args.failed_scenes_dir:
         raise RuntimeError("report-results cannot be enabled with no defined count of simulations")
 
     if not args.simulate:
         raise RuntimeError("report-results cannot be enabled without simulation")
 
 if args.save_failed_scenes == True:
-    if args.count <= 0:
+    if args.count <= 0 and not args.failed_scenes_dir:
         raise RuntimeError("save-failed-scenes cannot be enabled with no defined count of simulations")
 
     if not args.simulate:
@@ -221,15 +222,27 @@ if args.seed is not None:
     numpy.random.seed(args.seed)
 
 
-if args.rerun_failed_dir:
+if args.rerun_failed_dir is not None:
     # Load scenario and scene from file
     if args.verbosity >= 1:
         print("Beginning scenario loading...")
 
     with open(os.path.join(args.rerun_failed_dir, "failed_scenes.pkl"), "rb") as file:
-        rerun_failed_scenes = dill.load(file)
+        tempLoad = dill.load(file)
 
-    scenario = rerun_failed_scenes[0].scenerio
+    scenario: Scenario = tempLoad["scenerio"]
+    rerunFailedScenes: dict[int, Scene] = tempLoad["failed_scenes"]
+
+    rerunSceneKeys = []
+    if "all" in args.rerun_scenes:
+        rerunSceneKeys = list(rerunFailedScenes.keys())
+    else:
+        for key in args.rerun_scenes:
+            intKey = int(key)
+            if intKey in rerunFailedScenes:
+                rerunSceneKeys.append(intKey)
+            else:
+                raise RuntimeError(f"Invalid rerun key: {key}")
 
 else:
     startTime = time.time()
@@ -292,6 +305,7 @@ def runSimulation(scene, sceneCount):
         if args.verbosity >= 1:
             print(f"  Failed to create simulation: {e}")
         return None
+    
     if args.verbosity >= 1:
         totalTime = time.time() - startTime
         print(f"  Ran simulation in {totalTime:.4g} seconds.")
@@ -320,7 +334,7 @@ try:
                 )
 
         base_folder_name = os.path.join(args.failed_scenes_dir, datetime.now().strftime("%Y-%m-%d_%H-%M-%S-%f"))
-        if args.save_failed_scenes:
+        if args.save_failed_scenes and args.rerun_failed_dir is None:
             os.makedirs(base_folder_name)
 
             shutil.copy2(args.scenicFile, os.path.join(base_folder_name, "scenario.scenic"))
@@ -345,18 +359,28 @@ try:
         successCount = 0
         failedScenes = {}
         while True:
-            scene, _ = generateScene()
-            sceneCount += 1
+            if args.rerun_failed_dir is None:
+                scene, _ = generateScene()
+                sceneCount += 1
+
+                sceneData = scenario.sceneToBytes(scene)
+            else:
+                sceneCount = rerunSceneKeys.pop(0)
+                sceneData = rerunFailedScenes[sceneCount]
+                scene = scenario.sceneFromBytes(sceneData)
+            
             if args.simulate:
-                simulation_result = runSimulation(scene, sceneCount)
-                if simulation_result is not None:
+                simulationResult = runSimulation(scene, sceneCount)
+
+
+                if simulationResult is not None:
                     successCount += 1
 
                     if report_enabled:
-                        passed = simulation_result.checkPass()
+                        passed = simulationResult.checkPass()
 
                         if passed == False:
-                            failedScenes[sceneCount] = scene
+                            failedScenes[sceneCount] = sceneData
             else:
                 successCount += 1
                 if mode2D:
@@ -369,14 +393,18 @@ try:
                 else:
                     scene.show(axes=args.axes)
 
-            if 0 < args.count <= successCount:
-                break
+            if args.rerun_failed_dir is None:
+                if 0 < args.count <= successCount:
+                    break
+            else:
+                if len(rerunSceneKeys) == 0:
+                    break
 
         if report_enabled:
             passed_ammount = successCount - len(failedScenes)
             passed_rate = (passed_ammount / successCount) * 100
 
-            report_text = [
+            reportText = [
                 "=" * 40,
                 "Scenic Test Report",
                 "=" * 40,
@@ -390,20 +418,24 @@ try:
             ]
 
             if len(failedScenes) > 0:
-                report_text.append("\nFailed Simulations")
+                reportText.append("\nFailed Simulations")
                 for id in failedScenes.keys():
-                    report_text.append(f"  {id:04d}")
+                    reportText.append(f"  {id:04d}")
 
             if args.report_results:
-                print("\n".join(report_text))
+                print("\n".join(reportText))
 
             if args.save_failed_scenes:
                 if len(failedScenes) > 0:
+                    scenerioData = {
+                        "scenerio": scenario,
+                        "failed_scenes": failedScenes
+                    }
                     with open(os.path.join(base_folder_name, "failed_scenes.pkl"), "wb") as file:
-                        dill.dump(failedScenes, file)
+                        dill.dump(scenerioData, file)
 
                 with open(os.path.join(base_folder_name, "report.txt"), "w") as file:
-                    file.write("\n".join(report_text))
+                    file.write("\n".join(reportText))
 
                 
             
