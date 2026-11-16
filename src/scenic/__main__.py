@@ -9,6 +9,7 @@ import sys
 import time
 import warnings
 import os
+import dill
 import shutil
 import numpy
 import scenic
@@ -77,9 +78,11 @@ mainOptions.add_argument(
     "--failed-scenes-dir", default="./scenic_failures", help="location to save failed scenes for debugging", metavar="DIR"
 )
 mainOptions.add_argument(
-    "--rerun-failed", default="", help="location of failed scenes for rerunning", metavar="PATH"
+    "--rerun-failed-dir", default=None, help="location of failed scenerio for rerunning", metavar="PATH"
 )
-
+mainOptions.add_argument(
+    "--rerun-scenes", nargs="+", default=["all"], help="failed scenes to rerun", metavar="ID"
+)
 
 # Simulation options
 simOpts = parser.add_argument_group("dynamic simulation options")
@@ -217,28 +220,41 @@ if args.seed is not None:
     random.seed(args.seed)
     numpy.random.seed(args.seed)
 
-# Load scenario from file
-if args.verbosity >= 1:
-    print("Beginning scenario construction...")
-startTime = time.time()
-scenario = errors.callBeginningScenicTrace(
-    lambda: translator.scenarioFromFile(
-        args.scenicFile,
-        params=params,
-        model=args.model,
-        scenario=args.scenario,
-        mode2D=mode2D,
-    )
-)
 
-if args.report_results or args.save_failed_scenes:
-    errors.callBeginningScenicTrace(
-        lambda: scenario.validateTestRecords()
+if args.rerun_failed_dir:
+    # Load scenario and scene from file
+    if args.verbosity >= 1:
+        print("Beginning scenario loading...")
+
+    with open(os.path.join(args.rerun_failed_dir, "failed_scenes.pkl"), "rb") as file:
+        rerun_failed_scenes = dill.load(file)
+
+    scenario = rerun_failed_scenes[0].scenerio
+
+else:
+    startTime = time.time()
+
+    # Load scenario from file
+    if args.verbosity >= 1:
+        print("Beginning scenario construction...")
+    scenario = errors.callBeginningScenicTrace(
+        lambda: translator.scenarioFromFile(
+            args.scenicFile,
+            params=params,
+            model=args.model,
+            scenario=args.scenario,
+            mode2D=mode2D,
+        )
     )
 
-totalTime = time.time() - startTime
-if args.verbosity >= 1:
-    print(f"Scenario constructed in {totalTime:.2f} seconds.")
+    if args.report_results or args.save_failed_scenes:
+        errors.callBeginningScenicTrace(
+            lambda: scenario.validateTestRecords()
+        )
+
+    totalTime = time.time() - startTime
+    if args.verbosity >= 1:
+        print(f"Scenario constructed in {totalTime:.2f} seconds.")
 
 if args.simulate:
     simulator = errors.callBeginningScenicTrace(scenario.getSimulator)
@@ -327,7 +343,7 @@ try:
         
         sceneCount = 0
         successCount = 0
-        failedScenes = []
+        failedScenes = {}
         while True:
             scene, _ = generateScene()
             sceneCount += 1
@@ -340,15 +356,7 @@ try:
                         passed = simulation_result.checkPass()
 
                         if passed == False:
-
-                            if args.save_failed_scenes:
-                                scene_folder = os.path.join(base_folder_name, f"scene{sceneCount:04d}")
-                                os.mkdir(scene_folder)
-                                data = scenario.sceneToBytes(scene)
-                                with open(os.path.join(scene_folder, "data.bin"), "wb") as file:
-                                    file.write(data)
-                        
-                            failedScenes.append(sceneCount)
+                            failedScenes[sceneCount] = scene
             else:
                 successCount += 1
                 if mode2D:
@@ -383,13 +391,17 @@ try:
 
             if len(failedScenes) > 0:
                 report_text.append("\nFailed Simulations")
-                for id in failedScenes:
+                for id in failedScenes.keys():
                     report_text.append(f"  {id:04d}")
 
             if args.report_results:
                 print("\n".join(report_text))
 
             if args.save_failed_scenes:
+                if len(failedScenes) > 0:
+                    with open(os.path.join(base_folder_name, "failed_scenes.pkl"), "wb") as file:
+                        dill.dump(failedScenes, file)
+
                 with open(os.path.join(base_folder_name, "report.txt"), "w") as file:
                     file.write("\n".join(report_text))
 
