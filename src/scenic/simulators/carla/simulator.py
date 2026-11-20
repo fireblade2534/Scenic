@@ -199,6 +199,7 @@ class CarlaSimulation(DrivingSimulation):
                 ) from e
         if obj.rolename is not None:
             blueprint.set_attribute("role_name", obj.rolename)
+            blueprint.set_attribute("ros_name", obj.rolename)
 
         # set walker as not invincible
         if blueprint.has_attribute("is_invincible"):
@@ -282,8 +283,12 @@ class CarlaSimulation(DrivingSimulation):
                 carla_sensor = self.world.spawn_actor(
                     sensor_bp, transform, attach_to=obj.carlaActor
                 )
-                carla_sensor.listen(sensor.onData)
+                if callable(getattr(sensor, "onData", None)):
+                    carla_sensor.listen(sensor.onData)
                 sensor.carla_sensor = carla_sensor
+
+                if hasattr(carla_sensor, "enable_for_ros"):
+                    carla_sensor.enable_for_ros()
 
         return carlaActor
 
@@ -305,8 +310,9 @@ class CarlaSimulation(DrivingSimulation):
         for obj in self.objects:
             if obj.sensors:
                 for sensor in obj.sensors.values():
-                    while sensor.frame != self.current_frame:
-                        pass
+                    if callable(getattr(sensor, "onData", None)):
+                        while sensor.frame != self.current_frame:
+                            pass
 
         # Render simulation
         if self.render:
@@ -350,7 +356,8 @@ class CarlaSimulation(DrivingSimulation):
             if obj.sensors:
                 for sensor in obj.sensors.values():
                     if sensor.carla_sensor is not None and sensor.carla_sensor.is_alive:
-                        sensor.carla_sensor.stop()
+                        if sensor.carla_sensor.is_listening():
+                            sensor.carla_sensor.stop()
                         sensor.carla_sensor.destroy()
             if obj.carlaActor is not None:
                 if isinstance(obj.carlaActor, carla.Vehicle):
