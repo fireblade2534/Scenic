@@ -80,6 +80,7 @@ class Simulator(abc.ABC):
         maxIterations=1,
         *,
         timestep=None,
+        rtf=None,
         name=None,
         verbosity=None,
         raiseGuardViolations=False,
@@ -188,6 +189,7 @@ class Simulator(abc.ABC):
                 name=simName,
                 verbosity=verbosity,
                 timestep=timestep,
+                rtf=rtf,
                 raiseGuardViolations=raiseGuardViolations,
                 replay=replay,
                 enableReplay=enableReplay,
@@ -330,6 +332,7 @@ class Simulation(abc.ABC):
         maxSteps,
         name,
         timestep,
+        rtf=None,
         replay=None,
         enableReplay=True,
         allowPickle=False,
@@ -346,6 +349,7 @@ class Simulation(abc.ABC):
         self.records = defaultdict(list)
         self.currentTime = 0
         self.timestep = 1 if timestep is None else float(timestep)
+        self.rtf = rtf
         self.verbosity = verbosity
         self.name = name
         self.worker_num = 0
@@ -421,8 +425,11 @@ class Simulation(abc.ABC):
 
     def _run(self, dynamicScenario, maxSteps):
         assert self.currentTime == 0
+        if self.rtf is not None:
+            assert self.rtf > 0
 
         while True:
+            tickStartTime = time.perf_counter()
             if self.verbosity >= 3:
                 print(f"    Time step {self.currentTime}:")
 
@@ -528,6 +535,14 @@ class Simulation(abc.ABC):
             self.step()
             self.currentTime += 1
             self.updateObjects()
+
+            if self.rtf is not None:
+                tickTime = self.timestep / self.rtf
+                nextTickTime = tickStartTime + tickTime
+                remaining = nextTickTime - time.perf_counter()
+                if remaining > 0:
+                    time.sleep(remaining)
+
 
     def setup(self):
         """Set up the simulation to run in the simulator.
